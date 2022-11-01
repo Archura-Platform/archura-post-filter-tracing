@@ -1,39 +1,36 @@
 package io.archura.platform.imperativeshell.post.filter.tracing;
 
+import io.archura.platform.api.attribute.TraceKeys;
 import io.archura.platform.api.context.Context;
 import io.archura.platform.api.http.HttpServerRequest;
 import io.archura.platform.api.http.HttpServerResponse;
 import io.archura.platform.api.logger.Logger;
-import io.archura.platform.api.type.Configurable;
+import io.archura.platform.api.tracer.Tracer;
 
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
-import static java.util.Objects.nonNull;
-
-
-public class TracingFilter implements BiConsumer<HttpServerRequest, HttpServerResponse>, Configurable {
-
-    public static final String SPAN_HEADER_NAME = "X-A-Span-ID";
-    private Map<String, Object> configuration = new HashMap<>();
+public class TracingFilter implements BiConsumer<HttpServerRequest, HttpServerResponse> {
+    private final List<String> traceKeys = Arrays.stream(TraceKeys.values()).map(TraceKeys::getKey).toList();
 
     @Override
     public void accept(final HttpServerRequest request, final HttpServerResponse response) {
         final Context context = (Context) request.getAttributes().get(Context.class.getSimpleName());
         final Logger logger = context.getLogger();
-
-        final String spanHeaderName = String.valueOf(configuration.getOrDefault("SpanHeaderName", SPAN_HEADER_NAME));
-        final String spanId = request.getFirstHeader(spanHeaderName);
-        if (nonNull(spanId)) {
-            logger.debug("Span header: '%s', value: '%s'", spanHeaderName, spanId);
-            response.getHeaders().putIfAbsent(spanHeaderName, List.of(spanId));
+        final Optional<Tracer> tracerOptional = context.getTracer();
+        if (tracerOptional.isPresent()) {
+            final Map<String, Object> traceMap = request.getAttributes().entrySet().stream()
+                    .filter(e -> traceKeys.contains(e.getKey()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            final Tracer tracer = tracerOptional.get();
+            tracer.trace(traceMap);
+        } else {
+            logger.debug("The tracing filter is configured but the tracer is not available.");
         }
     }
 
-    @Override
-    public void setConfiguration(Map<String, Object> configuration) {
-        this.configuration = configuration;
-    }
 }
